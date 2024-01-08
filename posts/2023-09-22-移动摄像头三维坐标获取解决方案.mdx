@@ -1,0 +1,359 @@
+## 🚩监控摄像头像素坐标转世界坐标解决方案
+
+### 📖预备知识：
+
+- ##### 像素坐标系
+
+**像素坐标系（Pixel Coordinate System）：**像素坐标系（u，v）单位尺度为一个pixel，是离散图像坐标或像素坐标，原点在图片的左上角。像素坐标记为(u，v)。
+
+- ##### 图像坐标系
+
+**图像坐标系（Image Coordinate System）：**图像坐标系（X-img，Y-img）单位米或毫米，是连续图像坐标或者空间坐标，以图片对角线交点（图像中心点）作为基准原点建立的坐标系。图像坐标记为(X-img，Y-img)。
+
+![image-20230822162430392](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230822162430392.png)
+
+- ##### 归一化像平面
+
+**归一化像平面（Normalized Image Plane）：**也称归一化设备坐标（Normalized Device Coordinates, NDC），是一个在计算机图形学和计算机视觉中常用的概念，用于表示图像坐标的标准化坐标系。归一化平面通常定义在一个矩形区域内，其坐标范围在[-1,1]或[0,1]之间，便于进行图像处理、投影和渲染操作。归一化平面的原点通常位于平面的中心。归一化坐标记为(x, y)。
+
+![image-20230821162824509](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230821162824509.png)
+
+- ##### 相机坐标系
+
+**相机坐标系：**是摄像机在自己角度上的坐标系，原点在摄像机的光心上，Z轴与摄像机光轴平行，即摄像机的镜头拍摄方向。相机坐标记为（Xc，Yc，Zc）
+
+![image-20230821135350596](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230821135350596.png)
+
+- ##### 世界坐标系
+
+**世界坐标系（World Coordinate System）：**世界坐标系包括三维空间坐标系和一维时间坐标系。在此基础上，用解析的形式把物体在空间和时间的位置、姿态表示出来。一般三维空间坐标系用三个正交轴 X，Y，Z 表示物体的位置，用绕这三个正交轴的旋转角度表示物体的姿态，时间坐标系只有一个维度。坐标系坐标记为 (Xw, Yw, Zw)。
+
+- ##### 相机标定
+
+> [相机标定](https://blog.csdn.net/qq_44896301/article/details/130869103)
+
+**相机标定：**为确定空间物体表面某点的三维几何位置与其在图像中对应点之间的相互关系，必须建立摄像机成像几何模型，这些几何模型参数就是摄像机参数。求解这些参数的过程称之为摄像机标定。通常将这些参数称之为==内参==和==外参==，内参主要包含了相机的光学参数，外参则主要描述相机在世界坐标系中的位置和姿态。
+
+相机标定方式有：[传统相机](https://baike.baidu.com/item/传统相机/2099234?fromModule=lemma_inlink)[标定法](https://baike.baidu.com/item/标定法/2919017?fromModule=lemma_inlink)、[主动视觉](https://baike.baidu.com/item/主动视觉/20819018?fromModule=lemma_inlink)相机标定方法、相机自标定法、零失真相机标定法
+
+- ##### 畸变参数
+
+> [内参、外参、畸变参数三种参数与相机的标定方法](https://blog.csdn.net/yangdashi888/article/details/51356385)
+
+**畸变参数：**k1, k2, k3径向畸变系数，p1, p2是切向畸变系数。==径向畸变==发生在相机坐标系转图像物理坐标系的过程中。而==切向畸变==是发生在相机制作过程，其是由于感光元平面跟透镜不平行。
+
+- ##### 内参矩阵
+
+> remark: [图像缩放后相机内参如何变化 和 图像Resize后内外参如何变化](https://blog.csdn.net/qq_42518956/article/details/108072343)
+
+**内参矩阵（Intrinsic Matrix）：** 内参矩阵包含了相机的光学参数，如==焦距==、==光心==和像素间距等。它通常表示为一个3x3的矩阵，也被称为相机矩阵（Camera Matrix）。内参矩阵用于将相机坐标系下的点投影到图像坐标系，从而得到图像上的像素位置。内参矩阵可以由相机标定的过程中得到的一些校准图像的特征点（如棋盘格角点）的位置关系来计算得出。
+
+$$ K= \left[\begin{matrix}    fx & 0 & cx \\    0 & fy & cy \\    0 & 0 & 1   \end{matrix} \right]  $$ 
+
+矩阵`K`就是相机的内参矩阵，其中参数的意义如下：
+
+`fx` 和 `fy` 是水平和垂直方向上的焦距；
+
+`cx` 和 `cy` 是光心的像素坐标；
+
+内参矩阵主要用于==相机成像模型==和==逆投影==：
+
+1. 相机成像模型：将==相机系统下==的三维点映射到二维图像上；
+2. 逆投影：将二维图像上的点映射回==相机坐标系==中的三维点
+
+- ##### 外参矩阵
+
+**外参矩阵（Extrinsic Matrix）：** 外参矩阵描述了相机在世界坐标系中的位置和姿态，也就是相机==相对于被拍摄物体==的位置和朝向。外参矩阵通常表示为一个3x4的矩阵，它将世界坐标系下的点映射到相机坐标系。外参矩阵可以通过相机标定的过程中，对相机在不同位置拍摄标定板或特征点，然后通过求解问题的方式得到。外参通常由旋转矩阵（R）和平移向量（T）组成。
+
+==旋转矩阵（R）==：旋转矩阵描述了相机坐标系相对于世界坐标系的旋转姿态。它是一个3x3的正交矩阵，其中的每个元素表示了相机坐标系在三个轴上的旋转角度。旋转矩阵保持向量的 长度和夹角，因此它用于将 世界坐标系中的点 ==旋转到== 相机坐标系 中。
+
+$$ Rz = \left[\begin{matrix}    cos(θ) & -sin(θ) & 0 \\    sin(θ) & cos(θ) & 0 \\    0 & 0 & 1   \end{matrix} \right]  $$ $$ Ry=\left[\begin{matrix}    cos(θ) & 0 & sin(θ) \\    0 & 1 & 0 \\    -sin(θ) & 0 & cos(θ)   \end{matrix} \right]  $$ $$ Rx = \left[\begin{matrix}    1 & 0 & 0 \\    0 & cos(θ) & -sin(θ) \\    0 & sin(θ) & cos(θ)   \end{matrix} \right]  $$ 
+
+旋转矩阵`Rz`, `Ry`, `Rx` 分别为绕Z轴, Y轴, X轴 的旋转矩阵，其中`θ`为弧度值角度，范围是[-π,  π]。
+
+==平移向量（T）==：平移向量表示了相机坐标系的原点在世界坐标系的位置。它是一个3x1的向量，其中的每个元素表示相机坐标系在世界坐标系中的平移距离。
+
+$$ T = \left[\begin{matrix}    Tx & Ty & Tz   \end{matrix} \right]  $$ 
+
+平移向量`T` 的 `Tx`、`Ty`和`Tz` 分别是 X轴、Y轴和Z轴的平移向量的分量。
+
+
+
+### 📝任务概述
+
+> [ROS:二维坐标映射到三维坐标上(彩色与深度图像匹配)（基于深度相机D415）](https://blog.csdn.net/qq_23670601/article/details/97970892)
+
+**目的**：让监控图像动态计算图像的网格编码 = 即时计算监控图像的像素对应的真实空间坐标（经度，纬度，高程）= 真三维重建 
+
+**本质**：做三维重建的方案有很多，有点云生成、多视角图片结合深度信息进行匹配（[对极几何](https://zhuanlan.zhihu.com/p/441167915)）等，需要根据硬件特性进行选择。本次任务中主要是针对摄像头拍摄图像的三维重建，事实上就是要想办法获取到 摄像头 的 **==内参==**、==**外参 **==及 ==**深度信息**==。
+
+**现状**：当前的应用场景是较为复杂的，对于摄像头的分类：
+
+1. 能获取内外参并具有GPS和激光测距功能的摄像头；
+2. 能够获取旋转角度无激光测距功能的摄像头；
+3. ==可旋转但不能获取旋转角度参数无激光测距功能的摄像头；==
+4. ==不能旋转无激光测距功能的摄像头；==
+
+主要为第三、第四点的摄像头居多，这种摄像头无法直接利用 **内外参矩阵** 进行线性计算，需要通过人工智能的非线性模型来辅助计算。
+
+
+
+### 📌解决方案
+
+> [相机三维世界坐标与二维像素坐标转换——知乎](https://zhuanlan.zhihu.com/p/424980831)
+
+#### **思路：**
+
+像素坐标系 ->  图像坐标系 -> 归一化像平面(NDC) -> 相机坐标系 -> 世界坐标系
+
+#### **逆投影过程：**
+
+`备注：相机世界坐标系默认是笛卡尔坐标系，还需要涉及笛卡尔坐标系和地理坐标系的转化，这次计算忽略此种情况。`
+
+- 假设摄像头的地理位置为（113.25, 23.3, 3）经度113.25，纬度23.3，海拔高3米
+
+- 图像的宽幅为（1280，640）
+
+- 摄像头内参矩阵$$ K= \left[\begin{matrix}    500 & 0 & 640 \\    0 & 500 & 320 \\    0 & 0 & 1   \end{matrix} \right]  $$
+
+-  摄像机的外参 旋转矩阵$$  R = \left[\begin{matrix}    1 & 0 & 0 \\    0 & 1 & 0 \\    0 & 0 & 1   \end{matrix} \right]  $$ 平移矩阵$$  T = \left[\begin{matrix}    113.25 \\    23.3 \\    3  \end{matrix} \right]  $$，注意模拟的是摄像头不旋转的情况，如果旋转的情况下需要考虑用旋转矩阵、欧拉角、四元数等方法来描述相机的姿态。
+
+- 图像中某像素点P(u, v)的坐标为（320， 240），该点像素到摄像头距离为150m，**求其真实的三维空间点的位置**。
+
+**解：**
+
+1. 像素坐标系 ->  图像坐标系  (注：像素坐标系的坐标原点在左上角，图像坐标系在光心位置)
+
+   `备注：这里忽略畸变的情况，如果存在还需要 畸变向量 辅助矫正`
+
+   ```python
+   # 从像素坐标系转到图像坐标系只是涉及到坐标原点的变化，像素坐标系原点为图像左上角，图像坐标系原点为图像对角线交点（一般为光心，可在内参矩阵K中获取）
+   # 图像坐标系原点为像素坐标系的（640，320）。
+   
+   # 像素坐标P(u, v) 转 图像坐标P-img(x-img, y-img)
+   x_img = u - 640 = 320 - 640 = -320
+   y_img = v - 320 = 240 - 320 = -80
+   
+   # 由于像素坐标系的 y轴是朝下的，而图像坐标系的坐标是朝上的，因此实际y = - y
+   y_img = -y_img = 80
+   
+   # 求得图像坐标系下 P-img坐标为（-320，80）
+   ```
+
+2. 图像坐标系 -> 归一化像平面(NDC)
+
+   ```python
+   # 归一化坐标计算 设归一化坐标系后点P(x, y)
+   # 归一化坐标系的范围为[-1, 1]
+   
+   x = x_img / 640 = -320 / 640 = -0.5
+   y = y_img / 320 = 80 / 320 = 0.25
+   
+   # 像素点 P(320, 240) 在NDC坐标系中的坐标为 (-0.5, 0.25)
+   ```
+
+3. 归一化像平面(NDC) -> 相机坐标系
+
+   P_cam = K<sup>-1</sup> · P_ndc · d 
+
+   注：P_cam为相机坐标系点P，d为距离，需要150m转换成经纬度约为0.0013485
+
+   ```python
+   # 通过NDC坐标结合内参的逆投影计算点P在相机坐标系的坐标
+   P_ndc = np.array([-0.5, 0.25, 1])
+   k = np.array([[500,0,640],
+                 [0,500,320],
+                 [0,0,1]])
+   d = 0.00000899 * 150 = 0.0013485
+   # 求k的逆矩阵
+   k_inv = np.matrix(k).I
+   # 求最终结果
+   P_cam = k_inv.dot(P_ndc) * d
+   >>> matrix([[-0.00172743,-0.00086237,0.0013485]])
+   # P_cam(-0.00172743,-0.00086237,0.0013485) Xc = -0.00172743, Yc = -0.00086237, Zc = 0.0013485
+   ```
+
+4. 相机坐标系 -> 世界坐标系
+
+   P_world = R<sup>-1</sup> · P_cam + T
+
+   ```python
+   P_cam =np.array([-0.00172743,-0.00086237,0.0013485]) 
+   RT = np.array([[1,0,0],
+                  [0,1,0],
+                  [0,0,1]])
+   RT_inv = np.matrix(RT).I
+   P_world = RT_inv.dot(P_cam)  # 由于摄像头无旋转且为正轴方向，因此结果不变
+   >>> matrix([[-0.00172743, -0.00086237,  0.0013485 ]])
+   Xw, Yw, Zw = -0.00172743, -0.00086237,  0.0013485
+   Zw = 0.0013485 / 0.00000899 = 150  # 将十进制经纬度转换成米为单位
+   Xw = 113.25 - 0.00172743 = 113.24827257
+   Yw = 23.3 - 0.00086237 = 23.29913763
+   Zw = 3 + 150 = 153
+   # P_cam(113.24827257,23.29913763,153) Xc = 113.24827257, Yc = 23.29913763, Zc = 153
+   ```
+
+#### **成像模型计算过程：**
+
+> [针孔成像模型讲解](http://runxinzhi.com/silence-cho-p-15023822.html)
+
+**思路：**世界坐标系 -> 相机坐标系 -> 归一化像平面(NDC) -> 图像坐标系 -> 像素坐标系
+
+![image-20230922140530971](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230922140530971.png)
+
+![image-20230922141352658](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230922141352658.png)
+
+![image-20230821141109316](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230821141109316.png)
+
+
+
+### 🎯难点及突破思路
+
+#### 难点1：深度信息获取
+
+当摄像头无法物理测距时，可以通过一些算法来辅助计算距离信息。例如：
+
+- 双目立体匹配：通过两个摄像头捕捉到的图像，通过比较两个图像中的特征点计算深度。这种方法需要进行摄像头的标定以及特征点匹配来完成；
+- 深度学习：例如AI模型直接预测深度信息。这种方法需要大量的标注数据和计算资源。
+
+#### 难点2：内参获取
+
+内参一般随着摄像机出厂就已经规定好了，但是尝试了查找却很难查到内参信息，这部分通过AI也无法估算，只能通过[相机标定](https://blog.csdn.net/qq_44896301/article/details/130869103)的方法来进行计算。过程如下：
+
+1. 准备标定板
+2. 采集标定图像
+3. 检测角点
+4. 标定板坐标系和图像坐标系匹配
+5. 内参标定
+6. 外参标定
+7. 畸变矫正
+
+#### 难点3：外参获取
+
+外参是表示摄像头在真实世界的拍摄方位和位置，这种场景通常被称为“视觉里程计”或者“运动估计”，它涉及估计相机在不同时间或位置之间的旋转和平移变换，通过计算外参从而实现对相机位置和朝向的跟踪。
+
+目前我们外参主要是记录旋转矩阵，因为摄像头位置一般都是固定的，摄像头的位置信息只需要测量一次即可获取。
+
+
+
+### ✒️目前进度
+
+#### 难点1：深度信息的获取
+
+深度估计（[Depth Estimation](https://paperswithcode.com/task/depth-estimation)）：是深度学习的一个用图像直接估算距离的任务，主要用于**自动驾驶**、**SLAM**、**AR**等场景。因为我们场景下大多摄像头是没有测距信息的，所以想通过模型进行微调也很困难，必须要求深度估计模型具有良好的泛化性能，以适应不同的场景。
+
+查找了若干个模型，在最近两年开源的深度模型中，比如 [ZoeDepth](https://github.com/isl-org/ZoeDepth) 和 [dinov2](https://github.com/facebookresearch/dinov2)，经过实际场景数据进行泛化能力测试，发现泛化性能良好。比较早开源的深度估计模型，例如[monodepth2](https://github.com/nianticlabs/monodepth2)、[DPT](https://github.com/isl-org/DPT)、[MiDaS](https://github.com/isl-org/MiDaS) 和 [GeoNet](https://github.com/yzcjtr/GeoNet)等，泛化能力堪忧。
+
+##### monodepth2
+
+> [nianticlabs/monodepth2: [ICCV 2019\] Monocular depth estimation from a single image (github.com)](https://github.com/nianticlabs/monodepth2)
+
+官方例子：
+
+![teaser](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/teaser.gif)
+
+模型泛化能力表现：
+
+![image-20230922135337820](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230922135337820.png)
+
+![image-20230922135453043](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230922135453043.png)
+
+
+
+##### MiDaS
+
+> [isl-org/MiDaS: Code for robust monocular depth estimation described in "Ranftl et. al., Towards Robust Monocular Depth Estimation: Mixing Datasets for Zero-shot Cross-dataset Transfer, TPAMI 2022" (github.com)](https://github.com/isl-org/MiDaS)
+
+官方例子：
+
+![image-20230823100959029](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230823100959029.png)
+
+模型泛化能力表现：
+
+![image-20230922135044020](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230922135044020.png)
+
+![image-20230922135225154](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230922135225154.png)
+
+
+
+室内泛化能力良好，但是对距离较远的效果较差。
+
+##### DINOv2
+
+> [DINOv2 by Meta AI (metademolab.com)](https://dinov2.metademolab.com/demos?category=depth)
+
+官方例子：
+
+![image-20230823101350794](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230823101350794.png)
+
+模型泛化能力表现：
+
+![image-20230823101515588](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230823101515588.png)
+
+![image-20230823101541819](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/image-20230823101541819.png)
+
+其中，DINOv2模型不管是在室外还是室内，泛化能力都不错。
+
+#### 难点二：内参获取
+
+> [一文搞懂相机标定 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/583883569)
+
+内参暂时无相关的AI任务，只能通过相机标定获取。
+
+#### 难点三：外参获取
+
+> [SLAM 相机 位姿估计](http://zhaoxuhui.top/blog/2018/03/18/Location&PoseEstimationInSLAM.html)
+
+相机标定可以获取到内参以及外参，但是这时候的外参只是标定时相机的方位，因此如果摄像头需要移动和旋转时，这时的外参就要进行即时计算。
+
+关于评估摄像机的运动轨迹计算相机位置和朝向的跟踪的方法有很多，其中根据获取到的信息不同来选择不同的解决方案：
+
+- 2D-2D，单目相机获取的影像，只能获得像素坐标
+- 3D-3D配对点，RGBD或双目相机，可以获取深度信息
+- 3D-2D，已知一张图中的3D信息，另一张图只有2D信息
+
+
+
+### 📎对任总提供的解决思路的思考及评估
+
+**解决思路：**
+
+图像A已经配准完成，通过采样图像A和图像B的若干采样点的经纬度坐标，通过记录摄像头纵向移动的角度，假定图像A和图像B中心都距离摄像头相同距离，构建等比三角形来反推两个图像之间的变化关系。从而构建数学模型。
+
+![解决过程示意图](https://mr-lai.oss-cn-zhangjiakou.aliyuncs.com/imgs/b4844b2382c34d0065c62cba42755df.jpg)
+
+**工作量评估：**
+
+参考相机定标的工作量，相机定标需要携带标定板到实地进行采样。
+
+~~任总的方案需要收集纵向移动过程中不同角度和采样点的真实坐标。~~
+
+工作量相差不大。
+
+**方案评估：**
+
+仔细思考后，数学建模过程与相机标定类似，但该方案尚未完善，假定完善后得到的回报并不比相机标定后得到的回报高，都是只能针对当前相机系统进行建模。且还有较多情况需要考虑，目前还只能应用到2D平面，大部分情况，图像A与图像B的中心距离摄像机的距离很难相等。
+
+- 目的是基于一张图为基准矫正与基准图接壤的其他图，误差会累加，离基准图越远的误差越大。
+- 等比三角形构建有问题，不一定能构建与基准图之间的数学模型。
+
+
+
+### 💾更新
+
+#### 2023.9.1 解决方案的更新
+
+> [raulmur/ORB_SLAM2：单目、立体和RGB-D相机的实时SLAM，具有环路检测和重新定位功能 (github.com)](https://github.com/raulmur/ORB_SLAM2)
+
+ORB-SLAM2 是用于**单目**、**立体**和 **RGB-D** 相机的实时 SLAM 库，用于计算相机轨迹和稀疏 3D 重建（在立体和 RGB-D 情况下具有真实比例）。它能够实时检测循环并重新定位相机。我们提供了在[KITTI数据集](http://www.cvlibs.net/datasets/kitti/eval_odometry.php)中以立体或单目运行SLAM系统的示例，在[TUM数据集](http://vision.in.tum.de/data/datasets/rgbd-dataset)中以RGB-D或单目运行SLAM系统，在[EuRoC数据集](http://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets)中以立体或单目方式运行SLAM系统。我们还提供了一个 ROS 节点来处理实时单目、立体或 RGB-D 流。
+
+**进度：**部署失败，源码为C++
+
+
+
+`TODO`：找到一些进行3D重建和位姿估计的项目，但是还没有时间去核实：
+
+> [colmap/colmap： COLMAP - Structure-from-Motion and Multi-View Stereo (github.com)](https://github.com/colmap/colmap)
+
+COLMAP是一种通用的运动结构（SfM）和多视图立体 具有图形和命令行界面的 （MVS） 管道。它提供了一个广泛的 用于重建有序和无序图像集合的特征范围。
+
